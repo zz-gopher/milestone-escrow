@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract MilestoneEscrow {
     uint256 public nextDealId;
@@ -40,6 +41,8 @@ contract MilestoneEscrow {
         uint256 milestoneCount
     );
 
+    event Funded(uint256 indexed dealId,  address indexed payer, uint256 totalAmount);
+
     function createDeal(address _payee, address _arbiter, address _token, uint256[] calldata amounts) external returns(uint256 dealId) {
         require(
             _payee != address(0) &&
@@ -68,6 +71,18 @@ contract MilestoneEscrow {
         });
 
         emit DealCreated(dealId, msg.sender, _payee, _arbiter, _token, total, amounts.length);
+    }
+
+    function fund(uint256 dealId) external {
+        require(dealId > 0 && dealId <= nextDealId && deals[dealId].payer != address(0), "deal not exist");
+        require(msg.sender == deals[dealId].payer, "only payer");
+        require(deals[dealId].status == DealStatus.Created, "Only deals that have been created can proceed with payment");
+        // 用户资金存入合约
+        IERC20 token = IERC20(deals[dealId].token);
+        bool ok = token.transferFrom(deals[dealId].payer, address(this), deals[dealId].totalAmount);
+        require(ok, "transferFrom failed");
+        deals[dealId].status = DealStatus.Funded;
+        emit Funded(dealId, deals[dealId].payer, deals[dealId].totalAmount);
     }
 
     function getMilestoneAmounts(uint256 dealId) external view returns(uint256[] memory) {
