@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract MilestoneEscrow {
     uint256 public nextDealId;
     mapping(uint256 => Deal) public deals;
-    mapping(uint256 => uint256[]) public milestoneAmounts;
+    mapping(uint256 => Milestone[]) public milestones;
     
     enum MilestoneStatus {
         Pending,    // 等待提交
@@ -19,6 +19,12 @@ contract MilestoneEscrow {
         Created, // 已创建
         Funded, // 已充值
         Closed // 已关闭
+    }
+
+    struct Milestone { 
+        uint256 amount; // 金额数量
+        MilestoneStatus status; // 状态
+        string deliverableURI; // 递送物
     }
 
     struct Deal {
@@ -43,6 +49,8 @@ contract MilestoneEscrow {
 
     event Funded(uint256 indexed dealId,  address indexed payer, uint256 totalAmount);
 
+    event Submitted(uint256 indexed dealId,  uint256 index, string deliverableURI);
+
     function createDeal(address _payee, address _arbiter, address _token, uint256[] calldata amounts) external returns(uint256 dealId) {
         require(
             _payee != address(0) &&
@@ -58,7 +66,11 @@ contract MilestoneEscrow {
             // 要求amounts里不能有0
             require(amounts[i] > 0, "zero milestone");
             total += amounts[i];
-            milestoneAmounts[dealId].push(amounts[i]);
+            milestones[dealId].push(Milestone({
+                amount:amounts[i],
+                status: MilestoneStatus.Pending,
+                deliverableURI: ""
+            }));
         }
         deals[dealId] = Deal({
             payer: msg.sender,
@@ -73,21 +85,39 @@ contract MilestoneEscrow {
         emit DealCreated(dealId, msg.sender, _payee, _arbiter, _token, total, amounts.length);
     }
 
-    function fund(uint256 dealId) external {
-        require(dealId > 0 && dealId <= nextDealId && deals[dealId].payer != address(0), "deal not exist");
-        require(msg.sender == deals[dealId].payer, "only payer");
-        require(deals[dealId].status == DealStatus.Created, "Only deals that have been created can proceed with payment");
+    function fund(uint256 dealId) external dealExists(dealId){
+        Deal storage d = deals[dealId];
+        require(d.payer != address(0), "deal not exist");
+        require(msg.sender == d.payer, "only payer");
+        require(d.status == DealStatus.Created, "Only deals that have been created can proceed with payment");
         // 用户资金存入合约
-        IERC20 token = IERC20(deals[dealId].token);
-        bool ok = token.transferFrom(deals[dealId].payer, address(this), deals[dealId].totalAmount);
+        IERC20 token = IERC20(d.token);
+        bool ok = token.transferFrom(d.payer, address(this), d.totalAmount);
         require(ok, "transferFrom failed");
-        deals[dealId].status = DealStatus.Funded;
-        emit Funded(dealId, deals[dealId].payer, deals[dealId].totalAmount);
+        d.status = DealStatus.Funded;
+        emit Funded(dealId, d.payer, d.totalAmount);
     }
 
-    function getMilestoneAmounts(uint256 dealId) external view returns(uint256[] memory) {
-        require(dealId > 0 && dealId <= nextDealId, "deal not exist");
-        return milestoneAmounts[dealId];
+    function submit(uint256 dealId, uint256 index, string calldata deliverableURI) external dealExists(dealId){
+        Deal memory d = deals[dealId];
+        require(msg.sender == d.payee,"only payee");
+        require(d.status == DealStatus.Funded, "deal not funded");
+        require(index < d.milestoneCount, "Index out of bounds");
+        Milestone storage milestone = milestones[dealId][index];
+        require(milestone.amount > 0, "milestone not set");
+        require(bytes(deliverableURI).length > 0, "empty uri");
+        require(milestone.status == MilestoneStatus.Pending, "MilestoneStatus must are pending");
+        milestone.deliverableURI = deliverableURI;
+        milestone.status = MilestoneStatus.Submitted;
+        emit Submitted(dealId, index, deliverableURI);
     }
 
+    // function getMilestoneAmounts(uint256 dealId) external view returns(uint256[] memory) {
+    //     require(dealId > 0 && dealId <= nextDealId, "deal not exist");
+    //     return milestoneAmounts[dealId].;
+    // }
+    modifier dealExists(uint256 dealId) {
+        require(deals[dealId].payer != address(0), "deal not exist");
+        _;
+    }
 }
