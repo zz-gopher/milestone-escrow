@@ -50,6 +50,8 @@ contract MilestoneEscrow {
     event Funded(uint256 indexed dealId,  address indexed payer, uint256 totalAmount);
 
     event Submitted(uint256 indexed dealId,  uint256 index, string deliverableURI);
+    
+    event Approved(uint256 indexed dealId, uint256 index, uint256 amount);
 
     function createDeal(address _payee, address _arbiter, address _token, uint256[] calldata amounts) external returns(uint256 dealId) {
         require(
@@ -116,6 +118,20 @@ contract MilestoneEscrow {
     //     require(dealId > 0 && dealId <= nextDealId, "deal not exist");
     //     return milestoneAmounts[dealId].;
     // }
+    function approve(uint256 dealId, uint256 index) external dealExists(dealId){
+        Deal storage d = deals[dealId];
+        require(msg.sender == d.payer,"only payer");
+        require(d.status == DealStatus.Funded, "deal not funded");
+        require(index < d.milestoneCount, "Index out of bounds");
+        Milestone storage milestone = milestones[dealId][index];
+        require(milestone.amount > 0, "milestone not set");
+        require(milestone.status == MilestoneStatus.Submitted, "MilestoneStatus must are submitted");
+        milestone.status = MilestoneStatus.Approved;
+        IERC20 token = IERC20(d.token);
+        token.transferFrom(address(this), d.payee, milestone.amount);
+        emit Approved(dealId, index, milestone.amount);
+    }
+
     modifier dealExists(uint256 dealId) {
         require(deals[dealId].payer != address(0), "deal not exist");
         _;
