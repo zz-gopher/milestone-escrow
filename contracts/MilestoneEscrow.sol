@@ -132,6 +132,7 @@ contract MilestoneEscrow {
         emit Approved(dealId, index, milestone.amount);
     }
 
+    // 判定deal是否存在
     modifier dealExists(uint256 dealId) {
         require(deals[dealId].payer != address(0), "deal not exist");
         _;
