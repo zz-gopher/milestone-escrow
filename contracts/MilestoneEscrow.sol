@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+using SafeERC20 for IERC20;
 
 contract MilestoneEscrow {
     uint256 public nextDealId;
@@ -51,7 +54,7 @@ contract MilestoneEscrow {
 
     event Submitted(uint256 indexed dealId,  uint256 index, string deliverableURI);
     
-    event Approved(uint256 indexed dealId, uint256 index, uint256 amount);
+    event Approved(uint256 indexed dealId, address indexed payee, uint256 index, uint256 amount);
 
     function createDeal(address _payee, address _arbiter, address _token, uint256[] calldata amounts) external returns(uint256 dealId) {
         require(
@@ -94,8 +97,7 @@ contract MilestoneEscrow {
         require(d.status == DealStatus.Created, "Only deals that have been created can proceed with payment");
         // 用户资金存入合约
         IERC20 token = IERC20(d.token);
-        bool ok = token.transferFrom(d.payer, address(this), d.totalAmount);
-        require(ok, "transferFrom failed");
+        token.safeTransferFrom(d.payer, address(this), d.totalAmount);
         d.status = DealStatus.Funded;
         emit Funded(dealId, d.payer, d.totalAmount);
     }
@@ -125,11 +127,11 @@ contract MilestoneEscrow {
         require(index < d.milestoneCount, "Index out of bounds");
         Milestone storage milestone = milestones[dealId][index];
         require(milestone.amount > 0, "milestone not set");
-        require(milestone.status == MilestoneStatus.Submitted, "MilestoneStatus must are submitted");
-        milestone.status = MilestoneStatus.Approved;
+        require(milestone.status == MilestoneStatus.Submitted, "MilestoneStatus not submitted");
         IERC20 token = IERC20(d.token);
-        token.transferFrom(address(this), d.payee, milestone.amount);
-        emit Approved(dealId, index, milestone.amount);
+        token.safeTransfer(d.payee, milestone.amount);
+        milestone.status = MilestoneStatus.Approved;
+        emit Approved(dealId, d.payee, index, milestone.amount);
     }
 
     // 判定deal是否存在
