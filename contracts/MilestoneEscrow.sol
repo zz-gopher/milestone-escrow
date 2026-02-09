@@ -2,13 +2,15 @@
 pragma solidity ^0.8.28;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 using SafeERC20 for IERC20;
 
-contract MilestoneEscrow {
+contract MilestoneEscrow is ReentrancyGuard{
     uint256 public nextDealId;
     mapping(uint256 => Deal) public deals;
     mapping(uint256 => Milestone[]) public milestones;
+    mapping(address => uint256) public withdrawable;
     
     enum MilestoneStatus {
         Pending,    // 等待提交
@@ -90,19 +92,18 @@ contract MilestoneEscrow {
         emit DealCreated(dealId, msg.sender, _payee, _arbiter, _token, total, amounts.length);
     }
 
-    function fund(uint256 dealId) external dealExists(dealId){
+    function fund(uint256 dealId) external dealExists(dealId) nonReentrant{
         Deal storage d = deals[dealId];
         require(d.payer != address(0), "deal not exist");
         require(msg.sender == d.payer, "only payer");
         require(d.status == DealStatus.Created, "Only deals that have been created can proceed with payment");
         // 用户资金存入合约
-        IERC20 token = IERC20(d.token);
-        token.safeTransferFrom(d.payer, address(this), d.totalAmount);
         d.status = DealStatus.Funded;
+        IERC20(d.token).safeTransferFrom(d.payer, address(this), d.totalAmount);
         emit Funded(dealId, d.payer, d.totalAmount);
     }
 
-    function submit(uint256 dealId, uint256 index, string calldata deliverableURI) external dealExists(dealId){
+    function submit(uint256 dealId, uint256 index, string calldata deliverableURI) external dealExists(dealId) {
         Deal memory d = deals[dealId];
         require(msg.sender == d.payee,"only payee");
         require(d.status == DealStatus.Funded, "deal not funded");
@@ -128,10 +129,16 @@ contract MilestoneEscrow {
         Milestone storage milestone = milestones[dealId][index];
         require(milestone.amount > 0, "milestone not set");
         require(milestone.status == MilestoneStatus.Submitted, "MilestoneStatus not submitted");
-        IERC20 token = IERC20(d.token);
-        token.safeTransfer(d.payee, milestone.amount);
         milestone.status = MilestoneStatus.Approved;
+        withdrawable[d.payee] = milestone.amount;
         emit Approved(dealId, d.payee, index, milestone.amount);
+    }
+
+    function withdraw(address token) external nonReentrant {
+        uint256 amount = withdrawable[msg.sender];
+        require(amount > 0, "not fund");
+        withdrawable[msg.sender] = 0;
+        IERC20(token).safeTransfer(msg.sender, amount);
     }
 
     // 判定deal是否存在

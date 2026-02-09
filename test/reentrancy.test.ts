@@ -70,8 +70,9 @@ describe("MilestoneEscrow v1", () => {
 
 
     // ========= 8. 启动攻击 =========
+    await escrow.write.approve([dealId, 0n],{account: payer.account});
     // attack.attack(dealId)
-    await attack.write.attack([dealId],{account: payer.account});
+    await attack.write.attack([token.address],{account: payer.account});
 
 
     // ========= 9. 记录攻击后余额 =========
@@ -83,6 +84,7 @@ describe("MilestoneEscrow v1", () => {
     // after 应该 > before
     assert.ok(after > before, "Attack did not drain extra funds");
   });
+
   it("reentrancy attack should fail", async () => {
     const publicClient = await viem.getPublicClient();
 
@@ -134,9 +136,10 @@ describe("MilestoneEscrow v1", () => {
 
     // ========= 8. 启动攻击 =========
     // attack.attack(dealId)
+    await escrow.write.approve([dealId, 0n],{account: payer.account});
     await assert.rejects(
       async () => {
-        await attack.write.attack([dealId],{account: payer.account});
+        await attack.write.attack([token.address],{account: payer.account});
       },
       /revert/i
     );
@@ -144,7 +147,6 @@ describe("MilestoneEscrow v1", () => {
     // ========= 9. 记录攻击后余额 =========
     // const after = ...
     const after = await token.read.balanceOf([attack.address]);
-
 
     // ========= 10. 断言攻击失败 =========
     assert.ok(after <= before, "Attack drain extra funds");
