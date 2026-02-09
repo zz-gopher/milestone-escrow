@@ -29,7 +29,8 @@ contract MilestoneEscrow is ReentrancyGuard{
     struct Milestone { 
         uint256 amount; // 金额数量
         MilestoneStatus status; // 状态
-        string deliverableURI; // 递送物
+        string deliverableURI; // 递送物\
+        bool exists;
     }
 
     struct Deal {
@@ -58,6 +59,12 @@ contract MilestoneEscrow is ReentrancyGuard{
     
     event Approved(uint256 indexed dealId, address indexed payee, uint256 index, uint256 amount);
 
+    event Withdrawed(address indexed sender, address indexed token, uint256 amount);
+
+    event Disputed(uint256 indexed dealId, address indexed sender, uint256 milestoneId);
+
+    event Resolved(uint256 indexed dealId, uint256 milestoneId, uint256 amountToPayee);
+
     function createDeal(address _payee, address _arbiter, address _token, uint256[] calldata amounts) external returns(uint256 dealId) {
         require(
             _payee != address(0) &&
@@ -76,7 +83,8 @@ contract MilestoneEscrow is ReentrancyGuard{
             milestones[dealId].push(Milestone({
                 amount:amounts[i],
                 status: MilestoneStatus.Pending,
-                deliverableURI: ""
+                deliverableURI: "",
+                exists: true
             }));
         }
         deals[dealId] = Deal({
@@ -117,12 +125,8 @@ contract MilestoneEscrow is ReentrancyGuard{
         emit Submitted(dealId, index, deliverableURI);
     }
 
-    // function getMilestoneAmounts(uint256 dealId) external view returns(uint256[] memory) {
-    //     require(dealId > 0 && dealId <= nextDealId, "deal not exist");
-    //     return milestoneAmounts[dealId].;
-    // }
     function approve(uint256 dealId, uint256 index) external dealExists(dealId){
-        Deal storage d = deals[dealId];
+        Deal memory d = deals[dealId];
         require(msg.sender == d.payer,"only payer");
         require(d.status == DealStatus.Funded, "deal not funded");
         require(index < d.milestoneCount, "Index out of bounds");
@@ -139,11 +143,43 @@ contract MilestoneEscrow is ReentrancyGuard{
         require(amount > 0, "not fund");
         withdrawable[msg.sender] = 0;
         IERC20(token).safeTransfer(msg.sender, amount);
+        emit Withdrawed(msg.sender, token, amount);
+    }
+
+    function dispute(uint256 _dealId, uint256 _milestoneId) external dealExists(_dealId) milestoneExists(_dealId, _milestoneId) {
+        Deal storage d = deals[_dealId];
+        require(msg.sender == d.payee || msg.sender == d.payer,"only payee or payer");
+        Milestone storage m = milestones[_dealId][_milestoneId];
+        require(m.status == MilestoneStatus.Submitted, "MilestoneStatus not submitted");
+        m.status = MilestoneStatus.Disputed;
+        emit Disputed(_dealId, msg.sender, _milestoneId);
+    }
+    
+    function resolve(uint256 _dealId, uint256 _milestoneId, uint256 amountToPayee) external dealExists(_dealId) milestoneExists(_dealId, _milestoneId){
+        Deal storage d = deals[_dealId];
+        require(msg.sender == d.arbiter,"only arbiter");
+        require(d.status == DealStatus.Funded,"deal not funded");
+        Milestone storage m = milestones[_dealId][_milestoneId];
+        uint256 total = m.amount;
+        require(m.status == MilestoneStatus.Disputed, "MilestoneStatus not Disputed");
+        require(amountToPayee <= total, "the amountToPayee is too large");
+        m.status = MilestoneStatus.Resolved;
+        d.status = DealStatus.Closed;
+        m.amount = 0;
+        withdrawable[d.payee] += amountToPayee;
+        withdrawable[d.payer] += total - amountToPayee;
+        emit Resolved(_dealId, _milestoneId, amountToPayee);
     }
 
     // 判定deal是否存在
-    modifier dealExists(uint256 dealId) {
-        require(deals[dealId].payer != address(0), "deal not exist");
+    modifier dealExists(uint256 _dealId) {
+        require(deals[_dealId].payer != address(0), "deal not exist");
+        _;
+    }
+
+    // 判定milestone是否存在
+    modifier milestoneExists(uint256 _dealId, uint256 _milestoneId) {
+        require(milestones[_dealId][_milestoneId].exists, "milestone not exist");
         _;
     }
 }
