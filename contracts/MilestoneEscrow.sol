@@ -29,7 +29,7 @@ contract MilestoneEscrow is ReentrancyGuard{
     struct Milestone { 
         uint256 amount; // 金额数量
         MilestoneStatus status; // 状态
-        string deliverableURI; // 递送物\
+        string deliverableURI; // 递送物
         bool exists;
     }
 
@@ -64,6 +64,8 @@ contract MilestoneEscrow is ReentrancyGuard{
     event Disputed(uint256 indexed dealId, address indexed sender, uint256 milestoneId);
 
     event Resolved(uint256 indexed dealId, uint256 milestoneId, uint256 amountToPayee);
+
+    event Canceled(address indexed dealId,  address indexed sender);
 
     function createDeal(address _payee, address _arbiter, address _token, uint256[] calldata amounts) external returns(uint256 dealId) {
         require(
@@ -134,6 +136,7 @@ contract MilestoneEscrow is ReentrancyGuard{
         require(milestone.amount > 0, "milestone not set");
         require(milestone.status == MilestoneStatus.Submitted, "MilestoneStatus not submitted");
         milestone.status = MilestoneStatus.Approved;
+        d.status = DealStatus.Closed;
         withdrawable[d.payee] = milestone.amount;
         emit Approved(dealId, d.payee, index, milestone.amount);
     }
@@ -169,6 +172,14 @@ contract MilestoneEscrow is ReentrancyGuard{
         withdrawable[d.payee] += amountToPayee;
         withdrawable[d.payer] += total - amountToPayee;
         emit Resolved(_dealId, _milestoneId, amountToPayee);
+    }
+
+    function cancel(uint256 _dealId) external dealExists(_dealId) {
+        Deal storage d = deals[_dealId];
+        require(msg.sender == d.payer, "only payer");
+        require(d.status == DealStatus.Created, "deal must are created");
+        d.status = DealStatus.Closed;
+        emit Canceled(_dealId, msg.sender);
     }
 
     // 判定deal是否存在
